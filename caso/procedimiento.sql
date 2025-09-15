@@ -129,19 +129,21 @@ BEGIN
     
   EXCEPTION
     WHEN OTHERS THEN
-      DBMS_OUTPUT.PUT_LINE('=== ERROR EN VALIDACIONES ===');
-      DBMS_OUTPUT.PUT_LINE('Código: ' || SQLCODE);
-      DBMS_OUTPUT.PUT_LINE('Mensaje: ' || SQLERRM);
+      IF log_error('CRITICAL', 'build_plan_recursos', 
+                   'Error en validaciones - Código: ' || SQLCODE || ', Mensaje: ' || SQLERRM) = 0 THEN
+        NULL; -- Error logging failed, but continue
+      END IF;
       RAISE;
   END;
   
   -- Mensaje informativo sobre filtros aplicados
-  DBMS_OUTPUT.PUT_LINE('=== GENERANDO PLAN DE RECURSOS ===');
-  DBMS_OUTPUT.PUT_LINE('Parámetros:');
-  DBMS_OUTPUT.PUT_LINE('  - Semestres a proyectar: ' || p_next_n);
-  DBMS_OUTPUT.PUT_LINE('  - Filtro Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS'));
-  DBMS_OUTPUT.PUT_LINE('  - Filtro Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS'));
-  DBMS_OUTPUT.PUT_LINE('  - Filtro Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS'));
+  IF log_error('INFO', 'build_plan_recursos', 
+               'Generando plan de recursos - Semestres: ' || p_next_n || 
+               ', Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS') ||
+               ', Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS') ||
+               ', Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS')) = 0 THEN
+    NULL; -- Error logging failed, but continue
+  END IF;
   
   -- Abrir cursor complejo con parámetros
   OPEN c_prog(p_institucion_id, p_carrera_id, p_region_id);
@@ -153,8 +155,10 @@ BEGIN
     v_current_inst_id := v_prog.institucion_id;
     v_current_carrera_id := v_prog.carrera_id;
     
-    DBMS_OUTPUT.PUT_LINE('Procesando (' || v_contador || '): ' || 
-                        v_prog.institucion_nombre || ' - ' || v_prog.carrera_nombre);
+    IF log_error('INFO', 'build_plan_recursos', 
+                 'Procesando (' || v_contador || '): ' || v_prog.institucion_nombre || ' - ' || v_prog.carrera_nombre) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
 
     -- Bloque protegido para la proyección
     BEGIN
@@ -162,29 +166,39 @@ BEGIN
       
       -- Validar que la proyección no sea nula
       IF v_proyecto IS NULL THEN
-        DBMS_OUTPUT.PUT_LINE('WARNING: Proyección nula para Inst:' || v_prog.institucion_id || 
-                           ', Carrera:' || v_prog.carrera_id || '. Saltando...');
+        IF log_error('WARNING', 'build_plan_recursos', 
+                     'Proyección nula para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || '. Saltando...') = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
         CONTINUE;
       END IF;
       
       -- Validar que tenga el número correcto de elementos
       IF v_proyecto.COUNT != p_next_n THEN
-        DBMS_OUTPUT.PUT_LINE('WARNING: Proyección incompleta (' || v_proyecto.COUNT || 
-                           '/' || p_next_n || ' semestres). Continuando con datos parciales...');
+        IF log_error('WARNING', 'build_plan_recursos', 
+                     'Proyección incompleta (' || v_proyecto.COUNT || '/' || p_next_n || ' semestres). Continuando con datos parciales...') = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
       END IF;
       
     EXCEPTION
       WHEN NO_DATA_FOUND THEN
-        DBMS_OUTPUT.PUT_LINE('WARNING: Sin datos históricos para Inst:' || v_prog.institucion_id || 
-                           ', Carrera:' || v_prog.carrera_id || '. Saltando...');
+        IF log_error('WARNING', 'build_plan_recursos', 
+                     'Sin datos históricos para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || '. Saltando...') = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
         CONTINUE;
       WHEN VALUE_ERROR THEN
-        DBMS_OUTPUT.PUT_LINE('ERROR: Valores inválidos en proyección para Inst:' || v_prog.institucion_id || 
-                           ', Carrera:' || v_prog.carrera_id || '. Saltando...');
+        IF log_error('ERROR', 'build_plan_recursos', 
+                     'Valores inválidos en proyección para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || '. Saltando...') = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
         CONTINUE;
       WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('ERROR: Fallo en proyección para Inst:' || v_prog.institucion_id || 
-                           ', Carrera:' || v_prog.carrera_id || ' - ' || SQLERRM);
+        IF log_error('ERROR', 'build_plan_recursos', 
+                     'Fallo en proyección para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || ' - ' || SQLERRM) = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
         CONTINUE;
     END;
 
@@ -203,17 +217,24 @@ BEGIN
         EXCEPTION
           WHEN VALUE_ERROR THEN
             v_sem_label := 'ERROR-' || i;
-            DBMS_OUTPUT.PUT_LINE('WARNING: Error calculando etiqueta semestre ' || i || 
-                               '. Usando etiqueta por defecto: ' || v_sem_label);
+            IF log_error('WARNING', 'build_plan_recursos', 
+                         'Error calculando etiqueta semestre ' || i || '. Usando etiqueta por defecto: ' || v_sem_label) = 0 THEN
+              NULL; -- Error logging failed, but continue
+            END IF;
         END;
 
         -- Validar proyección antes de usar
         IF v_proyecto(i) IS NULL THEN
-          DBMS_OUTPUT.PUT_LINE('WARNING: Proyección nula para semestre ' || i || '. Usando 0.');
+          IF log_error('WARNING', 'build_plan_recursos', 
+                       'Proyección nula para semestre ' || i || '. Usando 0.') = 0 THEN
+            NULL; -- Error logging failed, but continue
+          END IF;
           v_proyecto(i) := 0;
         ELSIF v_proyecto(i) < 0 THEN
-          DBMS_OUTPUT.PUT_LINE('WARNING: Proyección negativa (' || v_proyecto(i) || 
-                             ') para semestre ' || i || '. Usando 0.');
+          IF log_error('WARNING', 'build_plan_recursos', 
+                       'Proyección negativa (' || v_proyecto(i) || ') para semestre ' || i || '. Usando 0.') = 0 THEN
+            NULL; -- Error logging failed, but continue
+          END IF;
           v_proyecto(i) := 0;
         END IF;
 
@@ -222,8 +243,10 @@ BEGIN
           v_profs := profs_necesitados(v_proyecto(i), 30);
         EXCEPTION
           WHEN OTHERS THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: Fallo calculando profesores para semestre ' || i || 
-                               '. Usando cálculo por defecto.');
+            IF log_error('ERROR', 'build_plan_recursos', 
+                         'Fallo calculando profesores para semestre ' || i || '. Usando cálculo por defecto.') = 0 THEN
+              NULL; -- Error logging failed, but continue
+            END IF;
             v_profs := CEIL(NVL(v_proyecto(i), 0) / 30);
         END;
         
@@ -243,8 +266,10 @@ BEGIN
           v_salas := salas_req(v_proyecto(i), v_capacidad_aula);
         EXCEPTION
           WHEN OTHERS THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: Fallo calculando salas para semestre ' || i || 
-                               '. Usando cálculo por defecto.');
+            IF log_error('ERROR', 'build_plan_recursos', 
+                         'Fallo calculando salas para semestre ' || i || '. Usando cálculo por defecto.') = 0 THEN
+              NULL; -- Error logging failed, but continue
+            END IF;
             v_salas := CEIL(NVL(v_proyecto(i), 0) / 40);
         END;
 
@@ -256,24 +281,36 @@ BEGIN
                   v_sem_label, v_proyecto(i), v_profs, v_salas);
         EXCEPTION
           WHEN DUP_VAL_ON_INDEX THEN
-            DBMS_OUTPUT.PUT_LINE('WARNING: Registro duplicado para Inst:' || v_prog.institucion_id || 
-                               ', Carrera:' || v_prog.carrera_id || ', Semestre:' || v_sem_label || '. Saltando...');
+            IF log_error('WARNING', 'build_plan_recursos', 
+                         'Registro duplicado para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || ', Semestre:' || v_sem_label || '. Saltando...') = 0 THEN
+              NULL; -- Error logging failed, but continue
+            END IF;
           WHEN OTHERS THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: Fallo insertando registro para semestre ' || i || 
-                               ' - ' || SQLERRM);
+            IF log_error('ERROR', 'build_plan_recursos', 
+                         'Fallo insertando registro para semestre ' || i || ' - ' || SQLERRM) = 0 THEN
+              NULL; -- Error logging failed, but continue
+            END IF;
             RAISE; -- Re-lanzar para que se maneje en el nivel superior
         END;
         
       EXCEPTION
         WHEN SUBSCRIPT_BEYOND_COUNT THEN
-          DBMS_OUTPUT.PUT_LINE('ERROR: Índice fuera de rango en proyección (semestre ' || i || 
-                             '). Elementos disponibles: ' || NVL(v_proyecto.COUNT, 0));
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Índice fuera de rango en proyección (semestre ' || i || '). Elementos disponibles: ' || NVL(v_proyecto.COUNT, 0)) = 0 THEN
+            NULL; -- Error logging failed, but continue
+          END IF;
           EXIT; -- Salir del loop de semestres
         WHEN SUBSCRIPT_OUTSIDE_LIMIT THEN
-          DBMS_OUTPUT.PUT_LINE('ERROR: Límite de VARRAY excedido en semestre ' || i);
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Límite de VARRAY excedido en semestre ' || i) = 0 THEN
+            NULL; -- Error logging failed, but continue
+          END IF;
           EXIT;
         WHEN OTHERS THEN
-          DBMS_OUTPUT.PUT_LINE('ERROR: Fallo procesando semestre ' || i || ' - ' || SQLERRM);
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Fallo procesando semestre ' || i || ' - ' || SQLERRM) = 0 THEN
+            NULL; -- Error logging failed, but continue
+          END IF;
           -- Continuar con el siguiente semestre
       END;
     END LOOP;
@@ -281,9 +318,11 @@ BEGIN
   END LOOP;
   CLOSE c_prog;
   
-  DBMS_OUTPUT.PUT_LINE('=== PROCESO COMPLETADO ===');
-  DBMS_OUTPUT.PUT_LINE('Combinaciones procesadas: ' || v_contador);
-  DBMS_OUTPUT.PUT_LINE('Registros totales generados: ' || (v_contador * p_next_n));
+  IF log_error('INFO', 'build_plan_recursos', 
+               'Proceso completado - Combinaciones procesadas: ' || v_contador || 
+               ', Registros totales generados: ' || (v_contador * p_next_n)) = 0 THEN
+    NULL; -- Error logging failed, but continue
+  END IF;
   
   COMMIT;
   
@@ -292,14 +331,14 @@ EXCEPTION
   WHEN e_parametros_invalidos THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE PARÁMETROS =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Parámetros recibidos:');
-    DBMS_OUTPUT.PUT_LINE('  - p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL'));
+    IF log_error('CRITICAL', 'build_plan_recursos', 
+                 'Error de parámetros - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 ', p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                 ', p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL') ||
+                 ', p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL') ||
+                 ', p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL')) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE;
@@ -308,28 +347,30 @@ EXCEPTION
   WHEN e_tabla_no_existe THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE TABLA FALTANTE =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Verifique que existan las siguientes tablas:');
-    DBMS_OUTPUT.PUT_LINE('  - MATRICULAS, INSTITUCIONES, CARRERAS');
-    DBMS_OUTPUT.PUT_LINE('  - PLANES_RECURSOS, INSTITUCION_CAPACIDAD');
+    IF log_error('CRITICAL', 'build_plan_recursos', 
+                 'Error de tabla faltante - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 '. Verifique que existan las tablas: MATRICULAS, INSTITUCIONES, CARRERAS, PLANES_RECURSOS, INSTITUCION_CAPACIDAD') = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE;
 
   -- Errores de cursor
   WHEN CURSOR_ALREADY_OPEN THEN
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE CURSOR =======');
-    DBMS_OUTPUT.PUT_LINE('El cursor ya estaba abierto. Cerrando y reintentando...');
+    IF log_error('ERROR', 'build_plan_recursos', 
+                 'Error de cursor: Ya estaba abierto. Cerrando y reintentando...') = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20300, 'Error de cursor: Ya estaba abierto');
 
   WHEN INVALID_CURSOR THEN
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE CURSOR INVÁLIDO =======');
-    DBMS_OUTPUT.PUT_LINE('Cursor en estado inválido');
-    DBMS_OUTPUT.PUT_LINE('Combinaciones procesadas: ' || NVL(v_contador, 0));
+    IF log_error('ERROR', 'build_plan_recursos', 
+                 'Cursor en estado inválido - Combinaciones procesadas: ' || NVL(v_contador, 0)) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20301, 'Error de cursor: Estado inválido');
@@ -338,12 +379,13 @@ EXCEPTION
   WHEN STORAGE_ERROR THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE MEMORIA =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Combinaciones procesadas: ' || NVL(v_contador, 0));
-    DBMS_OUTPUT.PUT_LINE('Última institución procesada: ' || NVL(v_current_inst_id, 0));
-    DBMS_OUTPUT.PUT_LINE('Última carrera procesada: ' || NVL(v_current_carrera_id, 0));
+    IF log_error('CRITICAL', 'build_plan_recursos', 
+                 'Error de memoria - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 ', Combinaciones procesadas: ' || NVL(v_contador, 0) ||
+                 ', Última institución: ' || NVL(v_current_inst_id, 0) ||
+                 ', Última carrera: ' || NVL(v_current_carrera_id, 0)) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20302, 'Error de memoria: Insuficiente espacio');
@@ -351,10 +393,10 @@ EXCEPTION
   WHEN PROGRAM_ERROR THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE PROGRAMA =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Error interno de PL/SQL detectado');
+    IF log_error('CRITICAL', 'build_plan_recursos', 
+                 'Error de programa interno - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20303, 'Error de programa interno');
@@ -363,24 +405,24 @@ EXCEPTION
   WHEN VALUE_ERROR THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE VALOR =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Datos problemáticos detectados en:');
-    DBMS_OUTPUT.PUT_LINE('  - Institución: ' || NVL(v_current_inst_id, 0));
-    DBMS_OUTPUT.PUT_LINE('  - Carrera: ' || NVL(v_current_carrera_id, 0));
-    DBMS_OUTPUT.PUT_LINE('  - Registro: ' || NVL(v_contador, 0));
+    IF log_error('ERROR', 'build_plan_recursos', 
+                 'Error de valor - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 ', Institución: ' || NVL(v_current_inst_id, 0) ||
+                 ', Carrera: ' || NVL(v_current_carrera_id, 0) ||
+                 ', Registro: ' || NVL(v_contador, 0)) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20304, 'Error de datos: Valores inválidos');
 
   WHEN NO_DATA_FOUND THEN
-    DBMS_OUTPUT.PUT_LINE('======= SIN DATOS =======');
-    DBMS_OUTPUT.PUT_LINE('No se encontraron datos para procesar');
-    DBMS_OUTPUT.PUT_LINE('Verifique los filtros aplicados:');
-    DBMS_OUTPUT.PUT_LINE('  - Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS'));
-    DBMS_OUTPUT.PUT_LINE('  - Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS'));
-    DBMS_OUTPUT.PUT_LINE('  - Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS'));
+    IF log_error('WARNING', 'build_plan_recursos', 
+                 'Sin datos para procesar - Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS') ||
+                 ', Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS') ||
+                 ', Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS')) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20305, 'Sin datos: No hay registros que procesar');
@@ -389,11 +431,11 @@ EXCEPTION
   WHEN DUP_VAL_ON_INDEX THEN
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
-    DBMS_OUTPUT.PUT_LINE('======= ERROR DE CLAVE DUPLICADA =======');
-    DBMS_OUTPUT.PUT_LINE('Código: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('Mensaje: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('Posible ejecución duplicada del procedimiento');
-    DBMS_OUTPUT.PUT_LINE('Considere limpiar PLANES_RECURSOS antes de ejecutar');
+    IF log_error('ERROR', 'build_plan_recursos', 
+                 'Error de clave duplicada - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 '. Posible ejecución duplicada. Considere limpiar PLANES_RECURSOS antes de ejecutar') = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
     ROLLBACK;
     RAISE_APPLICATION_ERROR(-20306, 'Error de duplicados: Ya existen registros');
@@ -403,49 +445,40 @@ EXCEPTION
     v_error_code := SQLCODE;
     v_error_msg := SQLERRM;
     
-    DBMS_OUTPUT.PUT_LINE('======================================');
-    DBMS_OUTPUT.PUT_LINE('======= ERROR INESPERADO =======');
-    DBMS_OUTPUT.PUT_LINE('======================================');
-    DBMS_OUTPUT.PUT_LINE('CÓDIGO DE ERROR: ' || v_error_code);
-    DBMS_OUTPUT.PUT_LINE('MENSAJE: ' || v_error_msg);
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('CONTEXTO DE EJECUCIÓN:');
-    DBMS_OUTPUT.PUT_LINE('  - Timestamp: ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
-    DBMS_OUTPUT.PUT_LINE('  - Usuario: ' || USER);
-    DBMS_OUTPUT.PUT_LINE('  - Sesión: ' || SYS_CONTEXT('USERENV', 'SESSIONID'));
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('PARÁMETROS DE ENTRADA:');
-    DBMS_OUTPUT.PUT_LINE('  - p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('  - p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL'));
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('ESTADO AL MOMENTO DEL ERROR:');
-    DBMS_OUTPUT.PUT_LINE('  - Combinaciones procesadas: ' || NVL(v_contador, 0));
-    DBMS_OUTPUT.PUT_LINE('  - Última institución: ' || NVL(v_current_inst_id, 0));
-    DBMS_OUTPUT.PUT_LINE('  - Última carrera: ' || NVL(v_current_carrera_id, 0));
-    DBMS_OUTPUT.PUT_LINE('  - Estado cursor: ' || CASE WHEN c_prog%ISOPEN THEN 'ABIERTO' ELSE 'CERRADO' END);
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('ACCIONES RECOMENDADAS:');
-    DBMS_OUTPUT.PUT_LINE('  1. Verificar integridad de datos en tablas base');
-    DBMS_OUTPUT.PUT_LINE('  2. Comprobar disponibilidad de funciones auxiliares');
-    DBMS_OUTPUT.PUT_LINE('  3. Revisar permisos de usuario');
-    DBMS_OUTPUT.PUT_LINE('  4. Contactar al administrador si persiste');
-    DBMS_OUTPUT.PUT_LINE('======================================');
+    IF log_error('CRITICAL', 'build_plan_recursos', 
+                 'Error inesperado - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                 ', Timestamp: ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS') ||
+                 ', Usuario: ' || USER || ', Sesión: ' || SYS_CONTEXT('USERENV', 'SESSIONID') ||
+                 ', p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                 ', p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL') ||
+                 ', p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL') ||
+                 ', p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL') ||
+                 ', Combinaciones procesadas: ' || NVL(v_contador, 0) ||
+                 ', Última institución: ' || NVL(v_current_inst_id, 0) ||
+                 ', Última carrera: ' || NVL(v_current_carrera_id, 0) ||
+                 ', Estado cursor: ' || CASE WHEN c_prog%ISOPEN THEN 'ABIERTO' ELSE 'CERRADO' END) = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     
     -- Limpieza de recursos
     BEGIN
       IF c_prog%ISOPEN THEN 
         CLOSE c_prog; 
-        DBMS_OUTPUT.PUT_LINE('INFO: Cursor cerrado correctamente');
+        IF log_error('INFO', 'build_plan_recursos', 'Cursor cerrado correctamente') = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
       END IF;
     EXCEPTION
       WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('WARNING: Error cerrando cursor: ' || SQLERRM);
+        IF log_error('WARNING', 'build_plan_recursos', 'Error cerrando cursor: ' || SQLERRM) = 0 THEN
+          NULL; -- Error logging failed, but continue
+        END IF;
     END;
     
     ROLLBACK;
-    DBMS_OUTPUT.PUT_LINE('INFO: Transacción revertida');
+    IF log_error('INFO', 'build_plan_recursos', 'Transacción revertida') = 0 THEN
+      NULL; -- Error logging failed, but continue
+    END IF;
     
     -- Re-lanzar con código específico
     RAISE_APPLICATION_ERROR(-20999, 

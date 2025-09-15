@@ -19,3 +19,22 @@ BEGIN
   END IF;
 END classrooms_needed;
 /
+
+-- Función para logging centralizado
+CREATE OR REPLACE FUNCTION log_error(
+  p_severity VARCHAR2,
+  p_source_obj VARCHAR2,
+  p_error_msg VARCHAR2
+) RETURN NUMBER IS
+  PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+  INSERT INTO ERROR_LOG (SEVERITY, SOURCE_OBJ, ERROR_MSG)
+  VALUES (p_severity, p_source_obj, p_error_msg);
+  COMMIT;
+  RETURN 1; -- Éxito
+EXCEPTION
+  WHEN OTHERS THEN
+    ROLLBACK;
+    RETURN 0; -- Fallo
+END log_error;
+/

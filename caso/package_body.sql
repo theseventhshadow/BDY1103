@@ -62,6 +62,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
   -- ====================================================================
   
   -- Función de logging centralizado
+  -- 1 Exito, 0 Fallo
   FUNCTION log_error(
     p_severity VARCHAR2,
     p_source_obj VARCHAR2,
@@ -76,11 +77,11 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     INSERT INTO ERROR_LOG (SEVERITY, SOURCE_OBJ, ERROR_MSG)
     VALUES (p_severity, p_source_obj, p_error_msg);
     COMMIT;
-    RETURN 1; -- Éxito
+    RETURN 1; 
   EXCEPTION
     WHEN OTHERS THEN
       ROLLBACK;
-      RETURN 0; -- Fallo
+      RETURN 0; 
   END log_error;
   
   -- Función para calcular profesores requeridos
@@ -97,7 +98,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
   END profs_req;
   
   -- Función para calcular aulas requeridas
-  FUNCTION classrooms_needed(
+  FUNCTION salas_req(
     p_estudiantes NUMBER, 
     p_sala_capacidad NUMBER DEFAULT C_DEFAULT_CLASSROOM_CAPACITY
   ) RETURN NUMBER IS
@@ -107,7 +108,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     ELSE
       RETURN CEIL(p_estudiantes / NVL(p_sala_capacidad, C_DEFAULT_CLASSROOM_CAPACITY));
     END IF;
-  END classrooms_needed;
+  END salas_req;
   
   -- Función para validar existencia de institución
   FUNCTION institucion_exists(p_institucion_id INTEGER) RETURN BOOLEAN IS
@@ -337,48 +338,111 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
       RETURN v_resultado;
     END IF;
 
-  EXCEPTION
+    EXCEPTION
     WHEN NO_DATA_FOUND THEN
-      g_error_count := g_error_count + 1;
-      IF log_error(C_LOG_WARNING, 'proyeccion_estudiantes_para_prox_semestres', 
-                   'No se encontraron datos históricos para Institución: ' || p_institucion_id || 
-                   ', Carrera: ' || p_carrera_id || ', Parámetros: n_semestres=' || p_next_n) = 0 THEN
+        IF log_error('WARNING', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'No se encontraron datos históricos para Institución: ' || p_institucion_id || 
+                    ', Carrera: ' || p_carrera_id || ', Parámetros: n_semestres=' || p_next_n) = 0 THEN
         NULL; -- Fallo en logging, continúa
-      END IF;
-      
-      v_resultado := proy_sem_t();
-      FOR i IN 1..p_next_n LOOP 
+        END IF;
+        
+        v_resultado := proy_sem_t();
+        FOR i IN 1..p_next_n LOOP 
         v_resultado.EXTEND; 
         v_resultado(i) := 0; 
-      END LOOP;
-      RETURN v_resultado;
-      
+        END LOOP;
+        RETURN v_resultado;
+        
+    WHEN VALUE_ERROR THEN
+        IF log_error('ERROR', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'Valor inválido detectado en parámetros - Institución: ' || NVL(TO_CHAR(p_institucion_id), 'NULL') || 
+                    ', Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'NULL') || 
+                    ', N semestres: ' || NVL(TO_CHAR(p_next_n), 'NULL')) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20001, 
+        'Error en valores: Verifique que los parámetros sean válidos');
+        
+    WHEN COLLECTION_IS_NULL THEN
+        IF log_error('ERROR', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'Problema con inicialización de colecciones - Institución: ' || p_institucion_id || 
+                    ', Carrera: ' || p_carrera_id || ', idx: ' || NVL(TO_CHAR(idx), 'NULL')) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20002, 
+        'Error interno: Fallo en inicialización de estructuras de datos');
+        
+    WHEN SUBSCRIPT_BEYOND_COUNT THEN
+        IF log_error('ERROR', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'Acceso fuera de rango en colección - idx actual: ' || NVL(TO_CHAR(idx), 'NULL') || 
+                    ', Tamaño v_counts: ' || NVL(TO_CHAR(v_counts.COUNT), 'NULL') ||
+                    ', Institución: ' || p_institucion_id || ', Carrera: ' || p_carrera_id) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20003, 
+        'Error de datos: Información histórica insuficiente');
+        
+    WHEN SUBSCRIPT_OUTSIDE_LIMIT THEN
+        IF log_error('ERROR', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'Límite de VARRAY excedido - N semestres solicitados: ' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                    ', Institución: ' || p_institucion_id || ', Carrera: ' || p_carrera_id) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20004, 
+        'Error de capacidad: Número de semestres excede límite máximo');
+        
+    WHEN ZERO_DIVIDE THEN
+        IF log_error('WARNING', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'División por cero detectada - Aplicando fallback: crecimiento = 0, v_last: ' || NVL(TO_CHAR(v_last), 'NULL') || 
+                    ', v_prev: ' || NVL(TO_CHAR(v_prev), 'NULL') ||
+                    ', Institución: ' || p_institucion_id || ', Carrera: ' || p_carrera_id) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        
+        v_resultado := proy_sem_t();
+        FOR i IN 1..p_next_n LOOP 
+        v_resultado.EXTEND; 
+        v_resultado(i) := NVL(v_last, 0);
+        END LOOP;
+        RETURN v_resultado;
+        
     WHEN OTHERS THEN
-      g_error_count := g_error_count + 1;
-      DECLARE
+        DECLARE
         v_error_code NUMBER := SQLCODE;
         v_error_msg VARCHAR2(4000) := SQLERRM;
-      BEGIN
-        IF log_error(C_LOG_CRITICAL, 'proyeccion_estudiantes_para_prox_semestres', 
-                     'ERROR INESPERADO: ' || v_error_msg || 
-                     ', Institución: ' || p_institucion_id || ', Carrera: ' || p_carrera_id) = 0 THEN
-          NULL; -- Fallo en logging, continúa
+        BEGIN
+        IF log_error('CRITICAL', 'proyeccion_estudiantes_para_prox_semestres', 
+                    'ERROR INESPERADO: ' || v_error_msg || 
+                    ' | PARÁMETROS: p_institucion_id=' || NVL(TO_CHAR(p_institucion_id), 'NULL') ||
+                    ', p_carrera_id=' || NVL(TO_CHAR(p_carrera_id), 'NULL') ||
+                    ', p_next_n=' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                    ' | ESTADO: idx=' || NVL(TO_CHAR(idx), 'NULL') ||
+                    ', v_last=' || NVL(TO_CHAR(v_last), 'NULL') ||
+                    ', v_prev=' || NVL(TO_CHAR(v_prev), 'NULL')) = 0 THEN
+            NULL; -- Fallo en logging, continúa
         END IF;
         
         -- Fallback seguro
         BEGIN
-          v_resultado := proy_sem_t();
-          FOR i IN 1..p_next_n LOOP 
+            v_resultado := proy_sem_t();
+            FOR i IN 1..LEAST(NVL(p_next_n, 4), 50) LOOP
             v_resultado.EXTEND; 
             v_resultado(i) := 0; 
-          END LOOP;
-          RETURN v_resultado;
+            END LOOP;
+            RETURN v_resultado;
         EXCEPTION
-          WHEN OTHERS THEN
-            RAISE_APPLICATION_ERROR(-20999, 'Error crítico en proyección: ' || v_error_msg);
+            WHEN OTHERS THEN
+            IF log_error('CRITICAL', 'proyeccion_estudiantes_para_prox_semestres', 
+                        'Error crítico en fallback: ' || SQLERRM || 
+                        ' - Sistema inestable - Parámetros: inst=' || p_institucion_id || ', carrera=' || p_carrera_id) = 0 THEN
+                NULL; -- Fallo en logging, continúa
+            END IF;
+            RAISE_APPLICATION_ERROR(-20999, 
+                'Error crítico: Sistema inestable');
         END;
-      END;
-  END proyeccion_estudiantes_para_prox_semestres;
+        END;
+        
+    END proyeccion_estudiantes_para_prox_semestres;
   
   -- ====================================================================
   -- IMPLEMENTACIÓN DE PROCEDIMIENTOS PÚBLICOS
@@ -434,7 +498,19 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     v_error_msg VARCHAR2(4000);
     v_current_inst_id NUMBER;
     v_current_carrera_id NUMBER;
-
+      -- Excepciones personalizadas
+    e_no_historial EXCEPTION;
+    e_parametros_invalidos EXCEPTION;
+    e_tabla_no_existe EXCEPTION;
+    e_capacidad_insuficiente EXCEPTION;
+    e_datos_corruptos EXCEPTION;
+    e_funcion_no_disponible EXCEPTION;
+    
+    -- Códigos de error personalizados
+    PRAGMA EXCEPTION_INIT(e_tabla_no_existe, -00942);
+    PRAGMA EXCEPTION_INIT(e_capacidad_insuficiente, -20200);
+    PRAGMA EXCEPTION_INIT(e_datos_corruptos, -20201);
+    PRAGMA EXCEPTION_INIT(e_funcion_no_disponible, -20202);
   BEGIN
     -- Incrementar contador de llamadas
     g_call_count := g_call_count + 1;
@@ -458,12 +534,13 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     END IF;
     
     -- Mensaje informativo sobre filtros aplicados
+    -- If error logging fails, continue anyway
     IF log_error(C_LOG_INFO, 'build_plan_recursos', 
                  'Generando plan de recursos - Semestres: ' || p_next_n || 
                  ', Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS') ||
                  ', Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS') ||
                  ', Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS')) = 0 THEN
-      NULL; -- Error logging failed, but continue
+      NULL; 
     END IF;
     
     -- Abrir cursor complejo con parámetros
@@ -483,26 +560,40 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
           v_prog.carrera_id, 
           p_next_n
         );
-        
+
+        -- If error logging fails, continue anyway
         IF v_proyecto IS NULL OR v_proyecto.COUNT = 0 THEN
           IF log_error(C_LOG_WARNING, 'build_plan_recursos', 
                        'Proyección vacía para Institución: ' || v_prog.institucion_id || 
                        ', Carrera: ' || v_prog.carrera_id) = 0 THEN
-            NULL; -- Error logging failed, but continue
+            NULL; 
           END IF;
-          CONTINUE; -- Saltar a la siguiente iteración
+          CONTINUE;
         END IF;
         
-      EXCEPTION
+    EXCEPTION
+        -- If error logging fails, continue anyway
+        WHEN NO_DATA_FOUND THEN
+            IF log_error('WARNING', 'build_plan_recursos', 
+                        'Sin datos históricos para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || '. Saltando...') = 0 THEN
+            NULL; 
+            END IF;
+            CONTINUE;
+        -- If error logging fails, continue anyway
+        WHEN VALUE_ERROR THEN
+            IF log_error('ERROR', 'build_plan_recursos', 
+                        'Valores inválidos en proyección para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || '. Saltando...') = 0 THEN
+            NULL; 
+            END IF;
+            CONTINUE;
+        -- If error logging fails, continue anyway
         WHEN OTHERS THEN
-          g_error_count := g_error_count + 1;
-          IF log_error(C_LOG_ERROR, 'build_plan_recursos', 
-                       'Error en proyección para Institución: ' || v_current_inst_id || 
-                       ', Carrera: ' || v_current_carrera_id || ' - ' || SQLERRM) = 0 THEN
-            NULL; -- Error logging failed, but continue
-          END IF;
-          CONTINUE; -- Saltar a la siguiente iteración
-      END;
+            IF log_error('ERROR', 'build_plan_recursos', 
+                        'Fallo en proyección para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || ' - ' || SQLERRM) = 0 THEN
+            NULL;
+            END IF;
+            CONTINUE;
+    END;
 
       -- Generar registros para cada semestre proyectado
       FOR i IN 1..LEAST(p_next_n, NVL(v_proyecto.COUNT, 0)) LOOP
@@ -512,38 +603,48 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
           
           -- Calcular recursos necesarios
           v_profs := profs_req(v_proyecto(i));
-          v_salas := classrooms_needed(v_proyecto(i));
+          v_salas := salas_req(v_proyecto(i));
           
           -- Insertar registro en la tabla de planes
-          INSERT INTO PLANES_RECURSOS (
-            INSTITUCION_ID,
-            INSTITUCION_NOMBRE,
-            CARRERA_ID,
-            CARRERA_NOMBRE,
-            SEMESTRE_LABEL,
-            ESTUDIANTES_PROYECTADOS,
-            PROFERORES_REQUERIDOS,
-            SALAS_REQUERIDAS
-          ) VALUES (
-            v_prog.institucion_id,
-            v_prog.institucion_nombre,
-            v_prog.carrera_id,
-            v_prog.carrera_nombre,
-            v_sem_label,
-            v_proyecto(i),
-            v_profs,
-            v_salas
-          );
-          
+        BEGIN
+          INSERT INTO PLANES_RECURSOS (INSTITUCION_ID, INSTITUCION_NOMBRE, CARRERA_ID, CARRERA_NOMBRE,
+                                    SEMESTRE_LABEL, ESTUDIANTES_PROYECTADOS, PROFERORES_REQUERIDOS, SALAS_REQUERIDAS)
+          VALUES (v_prog.institucion_id, v_prog.institucion_nombre, v_prog.carrera_id, v_prog.carrera_nombre,
+                  v_sem_label, v_proyecto(i), v_profs, v_salas);
         EXCEPTION
-          WHEN OTHERS THEN
-            g_error_count := g_error_count + 1;
-            IF log_error(C_LOG_ERROR, 'build_plan_recursos', 
-                         'Error insertando plan - Institución: ' || v_prog.institucion_id || 
-                         ', Carrera: ' || v_prog.carrera_id || ', Semestre: ' || i || ' - ' || SQLERRM) = 0 THEN
-              NULL; -- Error logging failed, but continue
+          WHEN DUP_VAL_ON_INDEX THEN
+            IF log_error('WARNING', 'build_plan_recursos', 
+                         'Registro duplicado para Inst:' || v_prog.institucion_id || ', Carrera:' || v_prog.carrera_id || ', Semestre:' || v_sem_label || '. Saltando...') = 0 THEN
+              NULL; 
             END IF;
+          WHEN OTHERS THEN
+            IF log_error('ERROR', 'build_plan_recursos', 
+                         'Fallo insertando registro para semestre ' || i || ' - ' || SQLERRM) = 0 THEN
+              NULL; 
+            END IF;
+            RAISE; 
         END;
+          
+      EXCEPTION
+        WHEN SUBSCRIPT_BEYOND_COUNT THEN
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Índice fuera de rango en proyección (semestre ' || i || '). Elementos disponibles: ' || NVL(v_proyecto.COUNT, 0)) = 0 THEN
+            NULL;
+          END IF;
+          EXIT; -- Salir del loop de semestres
+        WHEN SUBSCRIPT_OUTSIDE_LIMIT THEN
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Límite de VARRAY excedido en semestre ' || i) = 0 THEN
+            NULL;
+          END IF;
+          EXIT;
+        WHEN OTHERS THEN
+          IF log_error('ERROR', 'build_plan_recursos', 
+                       'Fallo procesando semestre ' || i || ' - ' || SQLERRM) = 0 THEN
+            NULL;
+          END IF;
+          -- Continuar con el siguiente semestre
+       END;
       END LOOP;
 
     END LOOP;
@@ -557,21 +658,160 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     
     COMMIT;
     
-  EXCEPTION
-    WHEN OTHERS THEN
-      g_error_count := g_error_count + 1;
-      IF c_prog%ISOPEN THEN 
-        CLOSE c_prog; 
-      END IF;
-      ROLLBACK;
-      
-      IF log_error(C_LOG_CRITICAL, 'build_plan_recursos', 
-                   'Error crítico en build_plan_recursos: ' || SQLERRM) = 0 THEN
+    EXCEPTION
+    -- Errores de validación de parámetros
+    WHEN e_parametros_invalidos THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('CRITICAL', 'build_plan_recursos', 
+                    'Error de parámetros - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    ', p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                    ', p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL') ||
+                    ', p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL') ||
+                    ', p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL')) = 0 THEN
         NULL; -- Error logging failed, but continue
-      END IF;
-      
-      RAISE;
-  END build_plan_recursos;
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE;
+
+    -- Errores de tabla no encontrada
+    WHEN e_tabla_no_existe THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('CRITICAL', 'build_plan_recursos', 
+                    'Error de tabla faltante - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    '. Verifique que existan las tablas: MATRICULAS, INSTITUCIONES, CARRERAS, PLANES_RECURSOS, INSTITUCION_CAPACIDAD') = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE;
+
+    -- Errores de cursor
+    WHEN CURSOR_ALREADY_OPEN THEN
+        IF log_error('ERROR', 'build_plan_recursos', 
+                    'Error de cursor: Ya estaba abierto. Cerrando y reintentando...') = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20300, 'Error de cursor: Ya estaba abierto');
+
+    WHEN INVALID_CURSOR THEN
+        IF log_error('ERROR', 'build_plan_recursos', 
+                    'Cursor en estado inválido - Combinaciones procesadas: ' || NVL(v_contador, 0)) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20301, 'Error de cursor: Estado inválido');
+
+    -- Errores de memoria y recursos
+    WHEN STORAGE_ERROR THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('CRITICAL', 'build_plan_recursos', 
+                    'Error de memoria - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    ', Combinaciones procesadas: ' || NVL(v_contador, 0) ||
+                    ', Última institución: ' || NVL(v_current_inst_id, 0) ||
+                    ', Última carrera: ' || NVL(v_current_carrera_id, 0)) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20302, 'Error de memoria: Insuficiente espacio');
+
+    WHEN PROGRAM_ERROR THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('CRITICAL', 'build_plan_recursos', 
+                    'Error de programa interno - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20303, 'Error de programa interno');
+
+    -- Errores de datos
+    WHEN VALUE_ERROR THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('ERROR', 'build_plan_recursos', 
+                    'Error de valor - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    ', Institución: ' || NVL(v_current_inst_id, 0) ||
+                    ', Carrera: ' || NVL(v_current_carrera_id, 0) ||
+                    ', Registro: ' || NVL(v_contador, 0)) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20304, 'Error de datos: Valores inválidos');
+
+    WHEN NO_DATA_FOUND THEN
+        IF log_error('WARNING', 'build_plan_recursos', 
+                    'Sin datos para procesar - Institución: ' || NVL(TO_CHAR(p_institucion_id), 'TODAS') ||
+                    ', Carrera: ' || NVL(TO_CHAR(p_carrera_id), 'TODAS') ||
+                    ', Región: ' || NVL(TO_CHAR(p_region_id), 'TODAS')) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20305, 'Sin datos: No hay registros que procesar');
+
+    -- Errores de transacción
+    WHEN DUP_VAL_ON_INDEX THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('ERROR', 'build_plan_recursos', 
+                    'Error de clave duplicada - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    '. Posible ejecución duplicada. Considere limpiar PLANES_RECURSOS antes de ejecutar') = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        IF c_prog%ISOPEN THEN CLOSE c_prog; END IF;
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(-20306, 'Error de duplicados: Ya existen registros');
+
+    -- Errores generales del sistema
+    WHEN OTHERS THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        
+        IF log_error('CRITICAL', 'build_plan_recursos', 
+                    'Error inesperado - Código: ' || v_error_code || ', Mensaje: ' || v_error_msg ||
+                    ', Timestamp: ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS') ||
+                    ', Usuario: ' || USER || ', Sesión: ' || SYS_CONTEXT('USERENV', 'SESSIONID') ||
+                    ', p_next_n: ' || NVL(TO_CHAR(p_next_n), 'NULL') ||
+                    ', p_institucion_id: ' || NVL(TO_CHAR(p_institucion_id), 'NULL') ||
+                    ', p_carrera_id: ' || NVL(TO_CHAR(p_carrera_id), 'NULL') ||
+                    ', p_region_id: ' || NVL(TO_CHAR(p_region_id), 'NULL') ||
+                    ', Combinaciones procesadas: ' || NVL(v_contador, 0) ||
+                    ', Última institución: ' || NVL(v_current_inst_id, 0) ||
+                    ', Última carrera: ' || NVL(v_current_carrera_id, 0) ||
+                    ', Estado cursor: ' || CASE WHEN c_prog%ISOPEN THEN 'ABIERTO' ELSE 'CERRADO' END) = 0 THEN
+        NULL; -- Error logging failed, but continue
+        END IF;
+        
+        -- Limpieza de recursos
+        BEGIN
+        IF c_prog%ISOPEN THEN 
+            CLOSE c_prog; 
+            DBMS_OUTPUT.PUT_LINE('INFO: Cursor cerrado correctamente');
+        END IF;
+        EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('WARNING: Error cerrando cursor: ' || SQLERRM);
+        END;
+        
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('INFO: Transacción revertida');
+        
+        -- Re-lanzar con código específico
+        RAISE_APPLICATION_ERROR(-20999, 
+        'FATAL: build_plan_recursos falló (Código:' || v_error_code || ') - ' || 
+        SUBSTR(v_error_msg, 1, 1000));
+        
+    END build_plan_recursos;
   
   -- Procedimiento para limpiar datos antiguos
   PROCEDURE limpiar_planes_antiguos(p_dias_antiguedad NUMBER DEFAULT 30) IS
@@ -705,7 +945,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
           v_detalle.semestre_label := calcular_semestre_label(v_anio_actual, v_sem_actual, i);
           v_detalle.estudiantes_proyectados := v_proyeccion(i);
           v_detalle.profesores_requeridos := profs_req(v_proyeccion(i));
-          v_detalle.salas_requeridas := classrooms_needed(v_proyeccion(i));
+          v_detalle.salas_requeridas := salas_req(v_proyeccion(i));
           
           PIPE ROW(v_detalle);
         END LOOP;
@@ -967,7 +1207,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     
     BEGIN
       -- Usar función del package para calcular salas necesarias
-      v_salas_requeridas := classrooms_needed(v_total_estudiantes, v_cap_por_aula);
+      v_salas_requeridas := salas_req(v_total_estudiantes, v_cap_por_aula);
       
       -- Validar resultado
       IF v_salas_requeridas IS NULL OR v_salas_requeridas < 0 THEN
@@ -978,7 +1218,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
       WHEN OTHERS THEN
         g_error_count := g_error_count + 1;
         IF log_error(C_LOG_WARNING, 'verificar_capacidad_matricula', 
-                     'Error en función classrooms_needed - ' || SQLERRM || '. Calculando manualmente.') = 0 THEN
+                     'Error en función salas_req - ' || SQLERRM || '. Calculando manualmente.') = 0 THEN
           NULL; -- Error en logging, continúa
         END IF;
         v_salas_requeridas := CEIL(v_total_estudiantes / v_cap_por_aula);
@@ -1038,54 +1278,165 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
       END IF;
     END IF;
 
-  EXCEPTION
-    -- Manejar excepciones usando las excepciones definidas en el package
-    WHEN e_institucion_inexistente THEN
-      g_error_count := g_error_count + 1;
-      IF log_error(C_LOG_ERROR, 'verificar_capacidad_matricula', 
-                   'INSTITUCIÓN INEXISTENTE - Usuario: ' || v_usuario ||
-                   ', INSTITUCION_ID: ' || p_institucion_id) = 0 THEN
-        NULL;
-      END IF;
-      RAISE;
+    EXCEPTION
+    -- =====================================
+    -- MANEJO ESPECÍFICO DE EXCEPCIONES
+    -- =====================================
+    
+    -- Errores de validación de datos
+    WHEN e_datos_invalidos THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'ERROR DE DATOS INVÁLIDOS - Código: ' || v_error_code || 
+                    ', Mensaje: ' || v_error_msg || 
+                    ', Usuario: ' || v_usuario ||
+                    ', INSTITUCION_ID: ' || NVL(TO_CHAR(:NEW.INSTITUCION_ID), 'NULL') ||
+                    ', CARRERA_ID: ' || NVL(TO_CHAR(:NEW.CARRERA_ID), 'NULL') ||
+                    ', ANIO_INGRESO: ' || NVL(TO_CHAR(:NEW.ANIO_INGRESO), 'NULL') ||
+                    ', SEMESTRE_INGRESO: ' || NVL(TO_CHAR(:NEW.SEMESTRE_INGRESO), 'NULL')) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE;
 
-    WHEN e_carrera_inexistente THEN
-      g_error_count := g_error_count + 1;
-      IF log_error(C_LOG_ERROR, 'verificar_capacidad_matricula', 
-                   'CARRERA INEXISTENTE - Usuario: ' || v_usuario ||
-                   ', CARRERA_ID: ' || p_carrera_id) = 0 THEN
-        NULL;
-      END IF;
-      RAISE;
-
+    -- Capacidad excedida
     WHEN e_capacidad_excedida THEN
-      -- Ya se manejó arriba, solo re-lanzar
-      RAISE;
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'CAPACIDAD EXCEDIDA - Matrícula rechazada por falta de capacidad' ||
+                    ', Usuario: ' || v_usuario ||
+                    ', Institución: ' || :NEW.INSTITUCION_ID ||
+                    ', Carrera: ' || :NEW.CARRERA_ID ||
+                    ', Período: ' || :NEW.ANIO_INGRESO || '-' || :NEW.SEMESTRE_INGRESO ||
+                    ', Estudiantes totales: ' || NVL(v_total_estudiantes, 0) ||
+                    ', Salas requeridas: ' || NVL(v_salas_requeridas, 0) ||
+                    ', Salas disponibles: ' || NVL(v_salas_disp, 0) ||
+                    '. Recomendación: Aumentar TOTAL_AULAS en INSTITUCION_CAPACIDAD') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE;
 
+    -- Institución inexistente
+    WHEN e_institucion_inexistente THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'INSTITUCIÓN INEXISTENTE - Usuario: ' || v_usuario ||
+                    ', INSTITUCION_ID no válido: ' || :NEW.INSTITUCION_ID ||
+                    '. Verificar tabla INSTITUCIONES') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20022, 'TRIGGER_ERROR: Institución ' || :NEW.INSTITUCION_ID || ' no existe');
+
+    -- Carrera inexistente
+    WHEN e_carrera_inexistente THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'CARRERA INEXISTENTE - Usuario: ' || v_usuario ||
+                    ', CARRERA_ID no válido: ' || :NEW.CARRERA_ID ||
+                    '. Verificar tabla CARRERAS') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20023, 'TRIGGER_ERROR: Carrera ' || :NEW.CARRERA_ID || ' no existe');
+
+    -- Función no disponible
+    WHEN e_funcion_no_disponible THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'FUNCIÓN NO DISPONIBLE - Error en función classrooms_needed' ||
+                    ', Parámetros: estudiantes=' || NVL(v_total_estudiantes,0) || 
+                    ', capacidad=' || NVL(v_cap_por_aula,0)) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20024, 'TRIGGER_ERROR: Función classrooms_needed no disponible');
+
+    -- Datos inconsistentes
+    WHEN e_datos_inconsistentes THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'DATOS INCONSISTENTES - Datos inconsistentes detectados en capacidad institucional' ||
+                    ', Institución: ' || :NEW.INSTITUCION_ID ||
+                    '. Verificar tabla INSTITUCION_CAPACIDAD') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE;
+
+    -- Sin datos encontrados (específico para capacidad)
+    WHEN NO_DATA_FOUND THEN
+        IF log_error('WARNING', 'trg_matriculas_check_capacidad', 
+                    'SIN DATOS DE CAPACIDAD - No existe registro en INSTITUCION_CAPACIDAD para INSTITUCION_ID: ' || :NEW.INSTITUCION_ID ||
+                    '. ACCIÓN: Matrícula permitida con valores por defecto' ||
+                    '. RECOMENDACIÓN: Crear registro de capacidad para esta institución') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        -- No bloquear la inserción, solo advertir
+
+    -- Demasiadas filas
+    WHEN TOO_MANY_ROWS THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'CONFIGURACIÓN DUPLICADA - Múltiples registros de capacidad para INSTITUCION_ID: ' || :NEW.INSTITUCION_ID ||
+                    '. ACCIÓN: Matrícula bloqueada' ||
+                    '. CORRECCIÓN: Eliminar registros duplicados en INSTITUCION_CAPACIDAD') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20025, 'TRIGGER_ERROR: Configuración de capacidad duplicada para institución ' || 
+                            :NEW.INSTITUCION_ID);
+
+    -- Errores de valor
+    WHEN VALUE_ERROR THEN
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'ERROR DE VALOR - Código: ' || v_error_code || 
+                    ', Mensaje: ' || v_error_msg ||
+                    ', Usuario: ' || v_usuario ||
+                    ', Error de conversión o valor inválido detectado' ||
+                    ', v_total_estudiantes: ' || NVL(TO_CHAR(v_total_estudiantes), 'NULL') ||
+                    ', v_cap_por_aula: ' || NVL(TO_CHAR(v_cap_por_aula), 'NULL') ||
+                    ', v_salas_requeridas: ' || NVL(TO_CHAR(v_salas_requeridas), 'NULL') ||
+                    ', v_salas_disp: ' || NVL(TO_CHAR(v_salas_disp), 'NULL')) = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20026, 'TRIGGER_ERROR: Error de valor en cálculos de capacidad');
+
+    -- Error de acceso (permisos, objetos bloqueados, etc.)
+    WHEN ACCESS_INTO_NULL THEN
+        IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
+                    'ERROR DE ACCESO - Intento de acceso a variable no inicializada') = 0 THEN
+        NULL; -- Fallo en logging, continúa
+        END IF;
+        RAISE_APPLICATION_ERROR(-20027, 'TRIGGER_ERROR: Variable no inicializada');
+
+    -- Errores generales del sistema
     WHEN OTHERS THEN
-      g_error_count := g_error_count + 1;
-      DECLARE
-        v_error_code NUMBER := SQLCODE;
-        v_error_msg VARCHAR2(4000) := SQLERRM;
-      BEGIN
-        IF log_error(C_LOG_CRITICAL, 'verificar_capacidad_matricula', 
-                     'ERROR INESPERADO EN VERIFICACIÓN - USUARIO: ' || v_usuario ||
-                     ', CÓDIGO: ' || v_error_code ||
-                     ', MENSAJE: ' || v_error_msg ||
-                     ', CONTEXTO: INSTITUCION_ID=' || p_institucion_id ||
-                     ', CARRERA_ID=' || p_carrera_id ||
-                     ', ANIO_INGRESO=' || p_anio_ingreso ||
-                     ', SEMESTRE_INGRESO=' || p_semestre_ingreso) = 0 THEN
-          NULL;
+        v_error_code := SQLCODE;
+        v_error_msg := SQLERRM;
+        
+        IF log_error('CRITICAL', 'trg_matriculas_check_capacidad', 
+                    'ERROR INESPERADO EN TRIGGER - USUARIO: ' || v_usuario ||
+                    ', CÓDIGO: ' || v_error_code ||
+                    ', MENSAJE: ' || v_error_msg ||
+                    ', CONTEXTO: INSTITUCION_ID=' || NVL(TO_CHAR(:NEW.INSTITUCION_ID), 'NULL') ||
+                    ', CARRERA_ID=' || NVL(TO_CHAR(:NEW.CARRERA_ID), 'NULL') ||
+                    ', ANIO_INGRESO=' || NVL(TO_CHAR(:NEW.ANIO_INGRESO), 'NULL') ||
+                    ', SEMESTRE_INGRESO=' || NVL(TO_CHAR(:NEW.SEMESTRE_INGRESO), 'NULL') ||
+                    ', PERSONA_ID=' || NVL(TO_CHAR(:NEW.PERSONA_ID), 'NULL') ||
+                    ', VARIABLES: v_total_estudiantes=' || NVL(TO_CHAR(v_total_estudiantes), 'NULL') ||
+                    ', v_cap_por_aula=' || NVL(TO_CHAR(v_cap_por_aula), 'NULL') ||
+                    ', v_salas_requeridas=' || NVL(TO_CHAR(v_salas_requeridas), 'NULL') ||
+                    ', v_salas_disp=' || NVL(TO_CHAR(v_salas_disp), 'NULL') ||
+                    ', v_institucion_exists=' || NVL(TO_CHAR(v_institucion_exists), 'NULL') ||
+                    ', v_carrera_exists=' || NVL(TO_CHAR(v_carrera_exists), 'NULL') ||
+                    ', SISTEMA: Sesión=' || SYS_CONTEXT('USERENV', 'SESSIONID') ||
+                    ', Terminal=' || SYS_CONTEXT('USERENV', 'TERMINAL') ||
+                    ', IP=' || SYS_CONTEXT('USERENV', 'IP_ADDRESS')) = 0 THEN
+        NULL; -- Fallo en logging, continúa
         END IF;
         
         -- Re-lanzar con información contextual
         RAISE_APPLICATION_ERROR(-20999, 
-          'TRIGGER_FATAL: Fallo inesperado en verificación de capacidad. ' ||
-          'Código: ' || v_error_code || ', Inst: ' || p_institucion_id ||
-          ', Carrera: ' || p_carrera_id ||
-          '. Mensaje: ' || SUBSTR(v_error_msg, 1, 1000));
-      END;
+        'TRIGGER_FATAL: Fallo inesperado en verificación de capacidad. ' ||
+        'Código: ' || v_error_code || ', Inst: ' || NVL(TO_CHAR(:NEW.INSTITUCION_ID), 'NULL') ||
+        ', Carrera: ' || NVL(TO_CHAR(:NEW.CARRERA_ID), 'NULL') ||
+        '. Mensaje: ' || SUBSTR(v_error_msg, 1, 1000));
+        
+    END;
   END verificar_capacidad_matricula;
 
 BEGIN

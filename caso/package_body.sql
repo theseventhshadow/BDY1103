@@ -6,56 +6,56 @@
 
 CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
 
-  -- ====================================================================
-  -- VARIABLES PRIVADAS DEL PACKAGE
-  -- ====================================================================
-  
-  -- Variables de configuración privadas
-  g_debug_mode BOOLEAN := FALSE;
-  g_log_enabled BOOLEAN := TRUE;
-  g_package_initialized BOOLEAN := FALSE;
-  g_call_count NUMBER := 0;
-  g_error_count NUMBER := 0;
-  
-  -- Cache para mejorar rendimiento
-  TYPE t_institucion_cache IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
-  TYPE t_carrera_cache IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
-  g_institucion_cache t_institucion_cache;
-  g_carrera_cache t_carrera_cache;
-  
-  -- ====================================================================
-  -- FUNCIONES PRIVADAS (SOLO ACCESIBLES DENTRO DEL PACKAGE)
-  -- ====================================================================
-  
-  -- Función privada para validar parámetros comunes
-  FUNCTION validar_parametros_basicos(
+    -- ====================================================================
+    -- VARIABLES PRIVADAS DEL PACKAGE
+    -- ====================================================================
+
+    -- Variables de configuración privadas
+    g_debug_mode BOOLEAN := FALSE;
+    g_log_enabled BOOLEAN := TRUE;
+    g_package_initialized BOOLEAN := FALSE;
+    g_call_count NUMBER := 0;
+    g_error_count NUMBER := 0;
+
+    -- Cache para mejorar rendimiento
+    TYPE t_institucion_cache IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
+    TYPE t_carrera_cache IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
+    g_institucion_cache t_institucion_cache;
+    g_carrera_cache t_carrera_cache;
+
+    -- ====================================================================
+    -- FUNCIONES PRIVADAS (SOLO ACCESIBLES DENTRO DEL PACKAGE)
+    -- ====================================================================
+
+    -- Función privada para validar parámetros comunes
+    FUNCTION validar_parametros_basicos(
     p_institucion_id INTEGER,
     p_carrera_id INTEGER,
     p_next_n NUMBER
-  ) RETURN BOOLEAN IS
-  BEGIN
+    ) RETURN BOOLEAN IS
+    BEGIN
     IF p_institucion_id IS NULL OR p_carrera_id IS NULL THEN
-      RETURN FALSE;
+        RETURN FALSE;
     END IF;
-    
+
     IF p_next_n IS NULL OR p_next_n <= 0 OR p_next_n > C_MAX_PROYECCION_SEMESTERS THEN
-      RETURN FALSE;
+        RETURN FALSE;
     END IF;
-    
+
     RETURN TRUE;
-  END validar_parametros_basicos;
-  
-  -- Función privada para obtener año y semestre actuales
-  PROCEDURE get_current_year_semester(
+    END validar_parametros_basicos;
+
+    -- Función privada para obtener año y semestre actuales
+    PROCEDURE get_current_year_semester(
     p_anio OUT NUMBER,
     p_semestre OUT NUMBER
-  ) IS
+    ) IS
     v_mes NUMBER;
-  BEGIN
+    BEGIN
     p_anio := TO_NUMBER(TO_CHAR(SYSDATE,'YYYY'));
     v_mes := TO_NUMBER(TO_CHAR(SYSDATE,'MM'));
     p_semestre := CASE WHEN v_mes <= 6 THEN 1 ELSE 2 END;
-  END get_current_year_semester;
+    END get_current_year_semester;
   
   -- ====================================================================
   -- IMPLEMENTACIÓN DE FUNCIONES PÚBLICAS
@@ -1340,12 +1340,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROYECCION_RECURSOS AS
     -- Función no disponible
     WHEN e_funcion_no_disponible THEN
         IF log_error('ERROR', 'trg_matriculas_check_capacidad', 
-                    'FUNCIÓN NO DISPONIBLE - Error en función classrooms_needed' ||
+                    'FUNCIÓN NO DISPONIBLE - Error en función salas_req' ||
                     ', Parámetros: estudiantes=' || NVL(v_total_estudiantes,0) || 
                     ', capacidad=' || NVL(v_cap_por_aula,0)) = 0 THEN
         NULL; -- Fallo en logging, continúa
         END IF;
-        RAISE_APPLICATION_ERROR(-20024, 'TRIGGER_ERROR: Función classrooms_needed no disponible');
+        RAISE_APPLICATION_ERROR(-20024, 'TRIGGER_ERROR: Función salas_req no disponible');
 
     -- Datos inconsistentes
     WHEN e_datos_inconsistentes THEN

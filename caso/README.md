@@ -1,4 +1,6 @@
-# Objetivo y supuestos
+# Sistema de Proyección de Recursos Educativos
+
+## Objetivo y supuestos
 
 Objetivo: usar los datos 2021 para proyectar demanda de aulas y docentes por programa y semestre, y generar un plan de recursos (nº aulas y docentes) por semestre para los próximos N semestres. Además dejar triggers que detecten sobrecarga de aulas cuando se inserte una matrícula nueva.
 
@@ -8,6 +10,36 @@ Supuestos:
 - Capacidad aula por defecto: 40 estudiantes (configurable).
 - Proyección simple: uso de crecimiento lineal basado en últimas k semestres (aquí 2 semestres históricos disponibles — si no hay históricos, uso media).
 - Usaremos semestres (p. ej. 2021-1, 2021-2) idénticos en el campo SEMESTRE INGRESO.
+
+## Package PKG_PROYECCION_RECURSOS
+
+Este proyecto incluye un **package completo** que encapsula toda la funcionalidad de proyección de recursos educativos, proporcionando una interfaz unificada y manejo robusto de errores.
+
+### Instalación Rápida
+
+```sql
+-- 1. Instalar el package completo (incluye VARRAY dinámico y trigger)
+@install_package.sql
+
+-- 2. Ejecutar ejemplos de uso
+@ejemplos_package.sql
+
+-- 3. Probar funcionalidad específica del VARRAY
+@ejemplos_varray_integrado.sql
+```
+
+### Características Principales
+
+- ✅ **Encapsulación completa**: Todas las funciones y procedimientos organizados en un package
+- ✅ **VARRAY dinámico**: Creación automática basada en duración real de carreras
+- ✅ **Trigger integrado**: Verificación de capacidad usando funciones del package
+- ✅ **Manejo robusto de errores**: Sistema de logging centralizado y excepciones personalizadas
+- ✅ **Cache inteligente**: Optimización de consultas frecuentes
+- ✅ **Funciones pipelined**: Consultas flexibles como tabla virtual
+- ✅ **Configuración por defecto**: Valores predeterminados personalizables
+- ✅ **Validación automática**: Verificación de parámetros y existencia de datos
+- ✅ **Sistema de logging**: Trazabilidad completa de operaciones y errores
+- ✅ **Instalación unificada**: Un solo script instala todo el sistema
 
 # Modelo de datos
 ```sql
@@ -284,17 +316,209 @@ END;
 /
 ```
 
-# Flujo de trabajo / ejecución sugerida y ejemplos de uso
+## Estructura del Package
 
-1. Cargar el Excel a MATRICULAS (CSV load o SQL Developer import).  Luego verificar con SELECT COUNT(*) FROM MATRICULAS; que los conteos concuerden.
-2. Definir capacidad institucional (ejemplo):
-```SQL
-INSERT INTO institution_capacity (nombre_institucion, total_classrooms, classroom_capacity, teacher_pool)
-VALUES ('Universidad Ejemplo', 20, 40, 120);
-COMMIT;
+### Archivos Principales
+
+- `package_spec.sql` - Especificación del package (interfaz pública)
+- `package_body.sql` - Implementación del package (lógica interna)
+- `install_package.sql` - Script de instalación automática
+- `ejemplos_package.sql` - Ejemplos de uso y casos prácticos
+- `ejemplos_varray_integrado.sql` - Ejemplos específicos del VARRAY dinámico
+- `trigger_integrado.sql` - Trigger simplificado que usa el package
+- `test_trigger_integrado.sql` - Pruebas completas del trigger
+
+### Archivos de Referencia (mantenidos por compatibilidad)
+
+- `varray.sql` - Versión original del VARRAY (ya no necesario)
+- `trigger.sql` - Versión original del trigger (reemplazado por versión integrada)
+- Archivos individuales de funciones (ahora integrados en el package)
+
+### Elementos del Package
+
+#### Tipos de Datos
+```sql
+TYPE t_proyeccion_detalle IS RECORD (...);  -- Estructura de proyección
+TYPE t_proyecciones_tabla IS TABLE OF ...;  -- Tabla de proyecciones
+proy_sem_t VARRAY(...) OF NUMBER;          -- Array dinámico de semestres
 ```
-3. Generar plan de recursos:
-```SQL
+
+#### VARRAY Dinámico Integrado
+```sql
+-- Funciones para manejo automático del VARRAY
+get_max_duracion_carreras() RETURN NUMBER;           -- Obtiene tamaño óptimo
+verificar_varray_existente() RETURN BOOLEAN;         -- Verifica existencia
+crear_varray_dinamico();                             -- Crea/recrea automáticamente
+```
+
+#### Integración con Triggers
+```sql
+-- Procedimiento usado por trigger para verificar capacidad
+verificar_capacidad_matricula(p_institucion_id, p_carrera_id, p_anio_ingreso, p_semestre_ingreso)
+```
+
+#### Constantes Públicas
+```sql
+C_DEFAULT_STUDENT_TEACHER_RATIO := 30;     -- Ratio estudiante-profesor
+C_DEFAULT_CLASSROOM_CAPACITY := 40;        -- Capacidad por aula
+C_MAX_PROYECCION_SEMESTERS := 20;          -- Máximo semestres a proyectar
+```
+
+#### Funciones Principales
+```sql
+-- Proyección de estudiantes
+proyeccion_estudiantes_para_prox_semestres(p_institucion_id, p_carrera_id, p_next_n)
+
+-- Cálculo de recursos
+profs_req(p_estudiantes, p_razon)
+classrooms_needed(p_estudiantes, p_sala_capacidad)
+
+-- Validación de datos
+institucion_exists(p_institucion_id)
+carrera_exists(p_carrera_id)
+
+-- Utilidades
+log_error(p_severity, p_source_obj, p_error_msg)
+get_package_stats()
+```
+
+#### Procedimientos Principales
+```sql
+-- Generar plan completo de recursos
+build_plan_recursos(p_next_n, p_institucion_id, p_carrera_id, p_region_id)
+
+-- Verificar capacidad (usado por trigger)
+verificar_capacidad_matricula(p_institucion_id, p_carrera_id, p_anio_ingreso, p_semestre_ingreso)
+
+-- Mantenimiento
+limpiar_planes_antiguos(p_dias_antiguedad)
+generar_reporte_capacidad(p_institucion_id, p_mostrar_detalles)
+```
+
+#### Funciones Pipelined
+```sql
+-- Obtener proyecciones como tabla virtual
+get_proyecciones_tabla(p_institucion_id, p_carrera_id, p_next_n)
+```
+
+## Flujo de trabajo / ejecución sugerida
+
+### 1. Instalación
+```sql
+-- Instalar package completo
+@install_package.sql
+```
+
+### 2. Configuración inicial
+```sql
+-- Configurar capacidades institucionales
+INSERT INTO INSTITUCION_CAPACIDAD (INSTITUCION_ID, TOTAL_AULAS, CAPACIDAD_POR_AULA, DOCENTES_DISPONIBLES)
+VALUES (1, 20, 40, 120);
+
+-- Verificar instalación
+SELECT PKG_PROYECCION_RECURSOS.get_package_stats() FROM DUAL;
+```
+
+### 3. Generar proyecciones
+```sql
+-- Plan completo para todas las instituciones
+PKG_PROYECCION_RECURSOS.build_plan_recursos(6);
+
+-- Plan específico para una institución
+PKG_PROYECCION_RECURSOS.build_plan_recursos(
+  p_next_n => 4,
+  p_institucion_id => 1,
+  p_carrera_id => NULL,
+  p_region_id => NULL
+);
+```
+
+### 4. Consultar resultados
+```sql
+-- Ver resumen por semestre
+SELECT SEMESTRE_LABEL, COUNT(*) as combinaciones, 
+       SUM(ESTUDIANTES_PROYECTADOS) as total_estudiantes
+FROM PLANES_RECURSOS 
+GROUP BY SEMESTRE_LABEL ORDER BY SEMESTRE_LABEL;
+
+-- Usar función pipelined para consultas flexibles
+SELECT * FROM TABLE(PKG_PROYECCION_RECURSOS.get_proyecciones_tabla(
+  p_next_n => 4
+)) WHERE estudiantes_proyectados > 100;
+
+-- Generar reporte de capacidad
+BEGIN
+  PKG_PROYECCION_RECURSOS.generar_reporte_capacidad();
+END;
+/
+```
+
+### 5. Probar trigger integrado
+```sql
+-- Ejecutar pruebas del trigger
+@test_trigger_integrado.sql
+
+-- El trigger automáticamente verifica capacidad al insertar matrículas
+-- usando el procedimiento del package
+```
+
+### 6. Mantenimiento
+```sql
+-- Limpiar planes antiguos (más de 30 días)
+PKG_PROYECCION_RECURSOS.limpiar_planes_antiguos(30);
+
+-- Ver log de errores
+SELECT * FROM ERROR_LOG 
+WHERE CREATED_AT >= SYSDATE - 1 
+ORDER BY CREATED_AT DESC;
+```
+
+## Trigger Integrado con Package
+
+El sistema incluye un **trigger simplificado** que utiliza el package para verificar capacidad:
+
+### Trigger Original vs Trigger Integrado
+
+| Aspecto | Trigger Original | Trigger Integrado |
+|---------|------------------|-------------------|
+| **Líneas de código** | ~400 líneas | ~10 líneas |
+| **Lógica** | Duplicada en trigger | Centralizada en package |
+| **Mantenimiento** | Difícil de modificar | Cambios en package |
+| **Testing** | Requiere insertar datos | Se puede probar directamente |
+| **Debugging** | Limitado en triggers | Full debugging en package |
+| **Logging** | Sistema propio | Sistema unificado |
+| **Reutilización** | Solo en trigger | Disponible en todo el package |
+
+### Archivos del Trigger Integrado
+
+- `trigger_integrado.sql` - Trigger simplificado que usa el package
+- `test_trigger_integrado.sql` - Pruebas completas del trigger
+- `trigger.sql` - Versión original (mantenida para referencia)
+
+## Ventajas del Package vs Archivos Separados
+
+| Aspecto | Archivos Separados | Package |
+|---------|-------------------|---------|
+| **Organización** | Disperso en múltiples archivos | Unificado en una estructura |
+| **Mantenimiento** | Difícil de mantener coherencia | Cambios centralizados |
+| **Rendimiento** | Carga individual de objetos | Carga única en memoria |
+| **Encapsulación** | Todo público | Elementos públicos/privados |
+| **Gestión de errores** | Manejo inconsistente | Sistema unificado de logging |
+| **Dependencias** | Orden manual de ejecución | Resuelto automáticamente |
+| **Reutilización** | Duplicación de código | Funciones compartidas |
+| **Debugging** | Múltiples puntos de fallo | Trazabilidad centralizada |
+| **Triggers** | Lógica duplicada | Lógica reutilizada |
+| **VARRAY** | Archivo separado, tamaño fijo | Integrado, tamaño dinámico |
+
+## Ejemplos de uso prácticos
+
+Ver archivo `ejemplos_package.sql` para casos de uso detallados incluyendo:
+- Proyecciones específicas por institución/carrera
+- Cálculos de recursos personalizados  
+- Validación de datos
+- Consultas con funciones pipelined
+- Generación de reportes
+- Mantenimiento y limpieza de datos
 BEGIN
   build_resource_plan(4); -- proyecta próximos 4 semestres
 END;
